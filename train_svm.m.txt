@@ -1,0 +1,126 @@
+clc;
+clear;
+
+%% COMPLETE IMAGE CLASSIFICATION PIPELINE
+
+% Step 1: Set dataset path (AUTO DETECT)
+datasetPath = '/MATLAB Drive/dataset';  % Directly set to the correct folder
+
+% Step 2: Check if folder exists
+if ~isfolder(datasetPath)
+    error('Dataset folder "dataset" not found in current directory!\nExpected structure: dataset/acute/*.jpg, dataset/chronic/*.jpg, dataset/normal/*.jpg');
+end
+
+fprintf('✓ Dataset folder found: %s\n', datasetPath);
+
+% Step 3: Load images (with subfolders as labels)
+try
+    imds = imageDatastore(datasetPath, ...
+        'IncludeSubfolders', true, ...
+        'LabelSource', 'foldernames', ...
+        'FileExtensions', {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'});
+    
+    % Debugging: Display the list of files to verify
+    disp(imds.Files);  % Display the list of files in the datastore
+    disp(numel(imds.Files));  % Display the number of files in the datastore
+    disp(imds.Labels);  % Display the labels for each image
+    
+    fprintf('✓ Found %d images across %d classes\n', numel(imds.Files), numel(categories(imds.Labels)));
+    
+    % Check folder contents to ensure there are images
+    disp('Acute folder contents:');
+    disp(dir(fullfile(datasetPath, 'acute')));
+    disp('Chronic folder contents:');
+    disp(dir(fullfile(datasetPath, 'chronic')));
+    disp('Normal folder contents:');
+    disp(dir(fullfile(datasetPath, 'normal')));
+catch ME
+    error('Failed to create imageDatastore: %s\nCheck folder structure: dataset/className/*.jpg', ME.message);
+end
+
+% Step 4: Image preprocessing parameters
+imgSize = [64 64];  % Resize all to 64x64
+
+% Step 5: Preallocate memory
+numImages = numel(imds.Files);
+features = zeros(numImages, 12);
+labels = string(imds.Labels);
+
+fprintf('✓ Processing %d images...\n', numImages);
+
+% Step 6: Extract features (loop through images)
+for i = 1:numImages
+   img = imread(imds.Files{i});
+    
+    %% 🔹 Preprocessing
+    if size(img,3) == 3
+        img = rgb2gray(img);
+    end
+    
+    img = imresize(img, imgSize);
+    img = medfilt2(img, [3 3]);
+    img = im2uint8(img);
+    
+    %% 🔹 GLCM Features
+    glcm = graycomatrix(img, 'Offset', [0 1]);
+    stats = graycoprops(glcm);
+    
+    contrast = stats.Contrast;
+    correlation = stats.Correlation;
+    energy = stats.Energy;
+    homogeneity = stats.Homogeneity;
+    
+    %% 🔹 Statistical Features
+    meanVal = mean2(img);
+    stdVal = std2(img);
+    entropyVal = entropy(img);
+    
+    %% 🔥 Morphological Analysis (ADD HERE)
+    bw = imbinarize(img);
+    bw = bwareaopen(bw, 50);
+    bw = imfill(bw, 'holes');
+    
+    stats2 = regionprops(bw, ...
+        'Area', 'Perimeter', ...
+        'MajorAxisLength', 'MinorAxisLength', ...
+        'Eccentricity');
+    
+    if ~isempty(stats2)
+        [~, idx] = max([stats2.Area]);
+        stats2 = stats2(idx);
+        
+        area = stats2.Area;
+        perimeter = stats2.Perimeter;
+        majorAxis = stats2.MajorAxisLength;
+        minorAxis = stats2.MinorAxisLength;
+        eccentricity = stats2.Eccentricity;
+    else
+        % fallback (if segmentation fails)
+        area = 0; perimeter = 0;
+        majorAxis = 0; minorAxis = 0;
+        eccentricity = 0;
+    end
+    
+    %% 🔹 Final Feature Vector
+    features(i,:) = [contrast correlation energy homogeneity ...
+                     meanVal stdVal entropyVal ...
+                     area perimeter majorAxis minorAxis eccentricity];
+end
+% Step 7: Train Multi-class SVM
+fprintf('✓ Training SVM classifier...\n');
+try
+    model = fitcecoc(features, labels, ...
+        'Learners', 'svm', ...
+        'Coding', 'onevsone');
+    fprintf('✓ Training completed ✅\n');
+catch ME
+    disp(['Error in training SVM: ', ME.message]);
+end
+
+% Step 8: Save model and data
+save('svm_image_classifier.mat', 'model', 'imgSize');
+fprintf('✓ Model saved as: svm_image_classifier.mat\n');
+
+% Step 9: Quick accuracy test (if you have test data)
+fprintf('\nModel ready for prediction!\n');
+fprintf('Use: [label, score] = predict(model, newFeatures)\n');

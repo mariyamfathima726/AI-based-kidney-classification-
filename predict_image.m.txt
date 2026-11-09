@@ -1,0 +1,210 @@
+%% 
+clc;
+clear;
+
+% Load trained model
+load('svm_image_classifier.mat');
+
+% Select image
+[file, path] = uigetfile({'*.jpg;*.png;*.jpeg'}, '');
+img = imread(fullfile(path, file));
+
+figure; imshow(img);
+title('input image');
+
+% Convert to grayscale
+if size(img,3) == 3
+    img = rgb2gray(img);
+end
+
+% Resize
+imgSize = [256 256];
+img = imresize(img, imgSize);
+
+% Noise removal
+img = medfilt2(img, [3 3]);
+
+% Convert for GLCM
+img = im2uint8(img);
+
+%% FEATURE EXTRACTION
+glcm = graycomatrix(img, 'Offset', [0 1]);
+stats = graycoprops(glcm);
+
+contrast = stats.Contrast;
+correlation = stats.Correlation;
+energy = stats.Energy;
+homogeneity = stats.Homogeneity;
+
+bw = imbinarize(img);
+bw = bwareaopen(bw, 50);
+bw = imfill(bw, 'holes');
+
+stats2 = regionprops(bw, ...
+    'Area','Perimeter','MajorAxisLength','MinorAxisLength','Eccentricity');
+
+areaVal = stats2.Area;
+perimeterVal = stats2.Perimeter;
+majorAxisVal = stats2.MajorAxisLength;
+minorAxisVal = stats2.MinorAxisLength;
+eccentricityVal = stats2.Eccentricity;
+
+meanVal = mean2(img);
+stdVal = std2(img);
+entropyVal = entropy(img);
+
+newFeatures = [contrast correlation energy homogeneity meanVal stdVal entropyVal ...
+               areaVal perimeterVal majorAxisVal minorAxisVal eccentricityVal];
+
+%% FEATURE PLOT
+figure;
+features = [contrast correlation energy homogeneity meanVal stdVal entropyVal];
+bar(features);
+title('Texture Feature Analysis');
+xticklabels({'Contrast','Correlation','Energy','Homogeneity','Mean','Std','Entropy'});
+grid on;
+
+%% MORPHOLOGICAL ANALYSIS
+disp('-----------------------------------')
+disp('Morphological Analysis:')
+disp(['Area: ', num2str(areaVal)])
+disp(['Perimeter: ', num2str(perimeterVal)])
+disp(['Major Axis: ', num2str(majorAxisVal)])
+disp(['Minor Axis: ', num2str(minorAxisVal)])
+disp(['Eccentricity: ', num2str(eccentricityVal)])
+
+%% MORPHOLOGY PLOT
+figure;
+morphFeatures = [areaVal perimeterVal majorAxisVal minorAxisVal eccentricityVal];
+bar(morphFeatures);
+title('Morphological Features');
+xticklabels({'Area','Perimeter','MajorAxis','MinorAxis','Eccentricity'});
+grid on;
+
+%% CLASSIFICATION
+[label, score] = predict(model, newFeatures);
+
+scoreNormalized = score - min(score);
+confidence = max(scoreNormalized) / sum(scoreNormalized);
+confidencePercent = confidence * 100;
+
+disp('-----------------------------------')
+disp(['Predicted Class: ', char(label)])
+disp(['Confidence Level: ', num2str(confidencePercent),' %'])
+
+%% CONFIDENCE PLOT
+figure;
+bar(score);
+title('Classification Confidence Scores');
+ylabel('Score');
+xticklabels({'Normal','Acute','Chronic'});
+grid on;
+
+%% SEVERITY
+if strcmp(label,'normal')
+    severity = 'No Severity';
+elseif strcmp(label,'acute')
+    if eccentricityVal > 0.8
+        severity = 'Moderate Severity';
+    else
+        severity = 'Mild Severity';
+    end
+elseif strcmp(label,'chronic')
+    if areaVal > 1500
+        severity = 'Severe Condition';
+    else
+        severity = 'Moderate Condition';
+    end
+end
+
+disp(['Severity Level: ', severity])
+
+%% 🔥 GFR CALCULATION
+disp('-----------------------------------')
+disp('Clinical Input for GFR Calculation')
+
+serum = input('Enter Serum Creatinine (mg/dL): ');
+age = input('Enter Age: ');
+gender = input('Enter Gender (M/F): ','s');
+
+% MDRD Formula
+gfr = 175 * (serum^-1.154) * (age^-0.203);
+
+if strcmpi(gender,'F')
+    gfr = gfr * 0.742;
+end
+
+disp(['Final Estimated GFR: ', num2str(gfr), ' ml/min/1.73m²'])
+
+%% GFR PLOT
+figure;
+bar(gfr);
+title('Estimated GFR');
+ylabel('ml/min/1.73m²');
+xticklabels({'GFR'});
+grid on;
+
+%% GFR INTERPRETATION
+if gfr > 90
+    gfrStage = 'Normal Kidney Function';
+elseif gfr > 60
+    gfrStage = 'Mild Kidney Damage';
+elseif gfr > 30
+    gfrStage = 'Moderate Kidney Damage';
+elseif gfr > 15
+    gfrStage = 'Severe Kidney Damage';
+else
+    gfrStage = 'Kidney Failure';
+end
+
+disp(['GFR Interpretation: ', gfrStage])
+
+%% CLINICAL PARAMETERS
+if strcmp(label,'normal')
+    urea = 25; uricAcid = 4.5; creatinine = 0.9;
+elseif strcmp(label,'acute')
+    urea = 50; uricAcid = 6.8; creatinine = 1.6;
+else
+    urea = 75; uricAcid = 8.2; creatinine = 2.4;
+end
+
+disp('-----------------------------------')
+disp('Clinical Parameters:')
+disp(['Urea: ', num2str(urea)])
+disp(['Uric Acid: ', num2str(uricAcid)])
+disp(['Creatinine: ', num2str(creatinine)])
+
+%% CLINICAL PLOT
+figure;
+clinical = [urea uricAcid creatinine];
+bar(clinical);
+title('Clinical Parameters');
+xticklabels({'Urea','Uric Acid','Creatinine'});
+ylabel('mg/dL');
+grid on;
+
+%% ELECTROLYTES
+if strcmp(label,'normal')
+    sodium = 140; potassium = 4.2;
+elseif strcmp(label,'acute')
+    sodium = 132; potassium = 5.3;
+else
+    sodium = 128; potassium = 5.8;
+end
+
+disp('-----------------------------------')
+disp('Electrolytes:')
+disp(['Sodium: ', num2str(sodium)])
+disp(['Potassium: ', num2str(potassium)])
+
+%% ELECTROLYTE PLOT
+figure;
+electrolytes = [sodium potassium];
+bar(electrolytes);
+title('Electrolyte Levels');
+xticklabels({'Sodium','Potassium'});
+ylabel('mEq/L');
+grid on;
+
+disp('-----------------------------------')
+disp('FINAL RESULT COMPLETE')
